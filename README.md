@@ -1,7 +1,7 @@
 # **Caspase-4 Expression in a scRNAseq dataset of Mtb-infected Macrophages**
 
 ### **Author:** Ophélie Rutschmann 
-(Work done during my PhD Project in Prof. McKinney's laboratory at the swiss Federal Institute for Technology (EPFL))  
+(Work done during my PhD Project in Prof. McKinney's laboratory at the Swiss Federal Institute for Technology (EPFL))  
 ### **Date:** September 2023
 
 ---
