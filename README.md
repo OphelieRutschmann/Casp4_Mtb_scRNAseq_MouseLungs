@@ -1,13 +1,14 @@
-# **Caspase-4 Expression Analysis in Mtb-infected Macrophages**
+# **Caspase-4 Expression in a scRNAseq dataset of Mtb-infected Macrophages**
 
-### **Author:** Ophélie Rutschmann (Work done during my PhD Project in Prof. McKinney's laboratory at the swiss Federal Institute for Technology (EPFL))  
+### **Author:** Ophélie Rutschmann 
+(Work done during my PhD Project in Prof. McKinney's laboratory at the swiss Federal Institute for Technology (EPFL))  
 ### **Date:** September 2023
 
 ---
 
 ## **Overview**
 
-This repository contains an R markdown analysis examining Caspase-4 (also known as Caspase-11) expression across macrophage populations in a single-cell RNA sequencing dataset of *Mycobacterium tuberculosis* (Mtb)-infected mouse lungs.
+This repository contains an R markdown analysis examining Caspase-4 (also known as Caspase-11) expression across macrophage populations in a **single-cell RNA sequencing** dataset of *Mycobacterium tuberculosis* (Mtb)-infected mouse lungs.
 
 Cells are separated by infection status (**infected**, **bystander**, and **uninfected**) and differential expression is assessed within each macrophage subpopulation. The analysis also includes pathway enrichment and a quantitative breakdown of Casp4+ cell distributions across populations.
 
