@@ -1,0 +1,721 @@
+# **Caspase-4 Expression Analysis in Mtb-infected Macrophages**
+
+---
+title: "Caspase-4 Expression Analysis in Mtb-infected Macrophages"
+author: "Ophélie Rutschmann"
+source: \>
+Data obtained from:
+Davide Pisu, Lu Huang, Vipin Narang, Monique Theriault, Gabrielle Lê-Bury,
+Bernett Lee, Agnes E. Lakudzala, David T. Mzinza, David V. Mhango,
+Steven C. Mitini-Nkhoma, Kondwani C. Jambo, Amit Singhal,
+Henry C. Mwandumba, David G. Russell;
+Single cell analysis of M. tuberculosis phenotype and macrophage
+lineages in the infected lung. J Exp Med 6 September 2021; 218 (9): e20210615.
+doi: https://doi.org/10.1084/jem.20210615
+date: "September 2023"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+## Overview
+
+This analysis examines **Caspase-4 (Also known as Caspase-11)** expression across macrophage populations in a single-cell RNA sequencing dataset of *Mycobacterium tuberculosis* (Mtb)-infected mouse lungs (Original data from Davide Pisu, Lu Huang, Vipin Narang, Monique Theriault, Gabrielle Lê-Bury, Bernett Lee, Agnes E. Lakudzala, David T. Mzinza, David V. Mhango, Steven C. Mitini-Nkhoma, Kondwani C. Jambo, Amit Singhal, Henry C. Mwandumba, David G. Russell; Single cell analysis of M. tuberculosis phenotype and macrophage lineages in the infected lung. J Exp Med 6 September 2021; 218 (9): e20210615. doi: <https://doi.org/10.1084/jem.20210615>). Cells are separated by infection status — **infected**, **bystander**, and **uninfected** — and differential expression is assessed within each macrophage subpopulation.
+
+The analysis is done directly on the GSE167232_mtb_integrated.rds file containing the seurat object obtained from <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE167232>.
+
+## Libraries
+
+```{r libraries}
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(clusterProfiler)
+library(enrichplot)
+library(org.Mm.eg.db)
+library(plyr)
+library(vioplot)
+library(dplyr)
+library(patchwork)
+library(ggupset)
+```
+
+------------------------------------------------------------------------
+
+## Helper Functions
+
+The `initialization()` function preprocesses the Seurat object by:
+
+-   Saving current cluster identities as `Cell_identity`
+-   Recoding cluster labels into broader `Cell_type` categories (alveolar macrophage, interstitial macrophage, DC, other)
+-   Creating an infection `Status` variable from the `MULTI_ID` field (`infected`, `bystander`, `uninfected`)
+-   Adding binary `Casp4_status` (expressing / not_expressing) and continuous `Casp4_value` features
+
+```{r initialization-function, cache=TRUE}
+initialization <- function(so) {
+
+  # Save current identities as a new variable
+  so[["Cell_identity"]] <- Idents(so)
+
+  # Create Cell_type category
+  so[["Cell_type"]] <- so$Cell_identity
+  so$Cell_type <- recode(so$Cell_type,
+    "AM_1" = "Alveolar_mac", "AM_2" = "Alveolar_mac",
+    "AM_3" = "Alveolar_mac", "AM_4" = "Alveolar_mac"
+  )
+  so$Cell_type <- recode(so$Cell_type,
+    "IM_1" = "Interstitial_mac", "IM_2" = "Interstitial_mac",
+    "IM_3" = "Interstitial_mac", "IM_4" = "Interstitial_mac"
+  )
+  so$Cell_type <- recode(so$Cell_type,
+    "DC.103+11B-" = "DC",
+    "Macrophages/T-cells" = "Other",
+    "Macrophages/B-cells" = "Other"
+  )
+
+  # Save infection status from MULTI_ID
+  so[["Status"]] <- so$MULTI_ID
+  so$Status[so$MULTI_ID == "gfp-hi" | so$MULTI_ID == "gfp-low"] <- "infected"
+  so$Status <- factor(so$Status, levels = c("uninfected", "bystander", "infected"))
+
+  # Create a new variable with Casp4 expression status
+  so[["Casp4_status"]] <- so@assays$RNA@data[
+    match("Casp4", so@assays$RNA@data@Dimnames[[1]]), ]
+  so$Casp4_status[so$Casp4_status > 0]  <- "expressing"
+  so$Casp4_status[so$Casp4_status <= 0] <- "not_expressing"
+
+  # Create a new feature with the Casp4 expression value
+  so[["Casp4_value"]] <- so@assays$RNA@data[
+    match("Casp4", so@assays$RNA@data@Dimnames[[1]]), ]
+
+  return(so)
+}
+```
+
+------------------------------------------------------------------------
+
+## Load and Initialize Dataset
+
+```{r load-data, cache=TRUE}
+so <- readRDS("GSE167232_mtb_integrated.RDS")
+so <- UpdateSeuratObject(so)
+so <- initialization(so)
+```
+
+```{r define-groups, cache=TRUE}
+# Cell population groupings
+alveolar     <- c("AM_4", "AM_1", "AM_2", "AM_3")
+interstitial <- c("IM_1", "IM_2", "IM_3", "IM_4")
+macrophages  <- c(alveolar, interstitial)
+
+# Convenience logical vectors
+is_infected  <- as.logical(so$Status == "infected")
+is_Casp4pos  <- as.logical(so$Casp4_value == "expressing")
+```
+
+```{r colour-palette, cache=TRUE}
+# Create a global colour palette (sienna / dark-blue) for the graphs
+# Three infection statuses
+status_cols <- c(
+  uninfected = "sienna4",
+  bystander  = "sienna2",
+  infected   = "midnightblue"
+)
+
+# Eight macrophage subpopulations (AM_1–4 in blues, IM_1–4 in siennas)
+mac_cols <- c(
+  AM_4       = "midnightblue",
+  AM_1       = "dodgerblue4",
+  AM_2       = "dodgerblue3",
+  AM_3       = "dodgerblue2",
+  IM_1       = "skyblue3",
+  IM_2       = "sienna4",
+  IM_3       = "sienna3",
+  IM_4       = "sienna2"
+)
+
+# Extended palette for DimPlot (all cell identities)
+cell_identity_cols <- c(
+  "midnightblue", "dodgerblue4", "dodgerblue3", "dodgerblue2",
+  "skyblue4",     "skyblue3",    "sienna4",     "sienna3",
+  "sienna2",      "sienna1",     "tan4",        "tan3",
+  "tan2",         "tan1"
+)
+
+# Continuous gradient endpoints
+col_low  <- "sienna4"
+col_high <- "midnightblue"
+```
+
+------------------------------------------------------------------------
+
+## Alveolar Macrophage Subpopulations
+
+### AM_1
+
+```{r AM1, cache=TRUE}
+Idents(so) <- "Cell_identity"
+AM1_so <- subset(so, idents = "AM_1")
+Idents(AM1_so) <- "Status"
+
+AM1.de.markers <- FindMarkers(AM1_so, ident.1 = "infected", ident.2 = "uninfected", only.pos = TRUE)
+AM1.de.markers$gene <- rownames(AM1.de.markers)
+
+VlnPlot(AM1_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** Casp4 is upregulated in infected vs. uninfected AM_1 cells, but not in bystanders.
+
+------------------------------------------------------------------------
+
+### AM_2
+
+```{r AM2, cache=TRUE}
+AM2_so <- subset(so, idents = "AM_2")
+Idents(AM2_so) <- "Status"
+
+AM2.de.markers <- FindMarkers(AM2_so, ident.1 = "bystander", ident.2 = "uninfected", only.pos = TRUE)
+AM2.de.markers$gene <- rownames(AM2.de.markers)
+
+VlnPlot(AM2_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** Casp4 is not upregulated in AM_2.
+
+------------------------------------------------------------------------
+
+### AM_3
+
+```{r AM3, cache=TRUE}
+AM3_so <- subset(so, idents = "AM_3")
+Idents(AM3_so) <- "Status"
+
+AM3.de.markers <- FindMarkers(AM3_so, ident.1 = "infected", ident.2 = "uninfected", only.pos = TRUE)
+AM3.de.markers$gene <- rownames(AM3.de.markers)
+
+VlnPlot(AM3_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** Casp4 is not upregulated in AM_3.
+
+------------------------------------------------------------------------
+
+### AM_4
+
+```{r AM4, cache=TRUE}
+AM4_so <- subset(so, idents = "AM_4")
+Idents(AM4_so) <- "Status"
+
+AM4.de.markers <- FindMarkers(AM4_so, ident.1 = "infected", ident.2 = "uninfected", only.pos = TRUE)
+AM4.de.markers$gene <- rownames(AM4.de.markers)
+
+VlnPlot(AM4_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** Casp4 is not upregulated in AM_4.
+
+------------------------------------------------------------------------
+
+### All Alveolar Macrophages (Grouped)
+
+```{r alveolar-grouped, cache=TRUE}
+Alveolar_so <- subset(so, idents = alveolar)
+Idents(Alveolar_so) <- "Status"
+
+Alveolar.de.markers <- FindMarkers(Alveolar_so, ident.1 = "infected", ident.2 = "bystander", only.pos = TRUE)
+Alveolar.de.markers$gene <- rownames(Alveolar.de.markers)
+
+VlnPlot(Alveolar_so, features = "Casp4", cols = status_cols)
+
+DotPlot(Alveolar_so, features = c("Casp4", "Il1b", "Casp1", "Nlrp3"),
+        col.min = 0, cols = c(col_low, col_high)) +
+  ggtitle("Alveolar Macrophages")
+```
+
+------------------------------------------------------------------------
+
+## Interstitial Macrophage Subpopulations
+
+### IM_1
+
+```{r IM1, cache=TRUE}
+Idents(so) <- "Cell_identity"
+IM1_so <- subset(so, idents = "IM_1")
+Idents(IM1_so) <- "Status"
+
+IM1.de.markers <- FindMarkers(IM1_so, ident.1 = "infected", ident.2 = "uninfected", only.pos = TRUE)
+IM1.de.markers$gene <- rownames(IM1.de.markers)
+
+VlnPlot(IM1_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** Casp4 is not upregulated in IM_1.
+
+------------------------------------------------------------------------
+
+### IM_2
+
+```{r IM2, cache=TRUE}
+IM2_so <- subset(so, idents = "IM_2")
+Idents(IM2_so) <- "Status"
+
+IM2.de.markers <- FindMarkers(IM2_so, ident.1 = "bystander", ident.2 = "uninfected", only.pos = TRUE)
+IM2.de.markers$gene <- rownames(IM2.de.markers)
+
+VlnPlot(IM2_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** Casp4 is not upregulated in IM_2.
+
+------------------------------------------------------------------------
+
+### IM_3
+
+```{r IM3, cache=TRUE}
+IM3_so <- subset(so, idents = "IM_3")
+Idents(IM3_so) <- "Status"
+
+IM3.de.markers <- FindMarkers(IM3_so, ident.1 = "bystander", ident.2 = "infected", only.pos = TRUE)
+IM3.de.markers$gene <- rownames(IM3.de.markers)
+
+VlnPlot(IM3_so, features = "Casp4", cols = status_cols)
+DotPlot(IM3_so, features = "Casp4", col.min = 0, cols = c(col_low, col_high))
+```
+
+> **Note:** Insufficient uninfected cells for a full differential analysis. DotPlot suggests Casp4 expression is present in this population.
+
+------------------------------------------------------------------------
+
+### IM_4
+
+```{r IM4, cache=TRUE}
+IM4_so <- subset(so, idents = "IM_4")
+Idents(IM4_so) <- "Status"
+
+IM4.de.markers <- FindMarkers(IM4_so, ident.1 = "infected", ident.2 = "uninfected", only.pos = TRUE)
+IM4.de.markers$gene <- rownames(IM4.de.markers)
+
+VlnPlot(IM4_so, features = "Casp4", cols = status_cols)
+DotPlot(IM4_so, features = "Casp4", col.min = 0, cols = c(col_low, col_high))
+```
+
+------------------------------------------------------------------------
+
+### All Interstitial Macrophages (Grouped)
+
+```{r interstitial-grouped, cache=TRUE}
+Interstitial_so <- subset(so, idents = interstitial)
+Idents(Interstitial_so) <- "Status"
+
+Interstitial.de.markers <- FindMarkers(Interstitial_so, ident.1 = "bystander", ident.2 = "uninfected", only.pos = TRUE)
+Interstitial.de.markers$gene <- rownames(Interstitial.de.markers)
+
+VlnPlot(Interstitial_so, features = "Casp4", cols = status_cols)
+
+DotPlot(Interstitial_so, features = c("Casp4", "Il1b", "Casp1", "Nlrp3"),
+        col.min = 0, cols = c(col_low, col_high)) +
+  ggtitle("Interstitial Macrophages")
+```
+
+------------------------------------------------------------------------
+
+## Other Myeloid Populations
+
+### Neutrophils
+
+```{r neutrophils, cache=TRUE}
+N_so <- subset(so, idents = "Neutrophils")
+Idents(N_so) <- "Status"
+
+N.de.markers <- FindMarkers(N_so, ident.1 = "infected", ident.2 = "uninfected", only.pos = TRUE)
+N.de.markers$gene <- rownames(N.de.markers)
+
+VlnPlot(N_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** Casp4 is upregulated in both bystander and infected neutrophils.
+
+------------------------------------------------------------------------
+
+### Monocytes
+
+```{r monocytes, cache=TRUE}
+M_so <- subset(so, idents = "Monocytes")
+Idents(M_so) <- "Status"
+
+M.de.markers <- FindMarkers(M_so, ident.1 = "bystander", ident.2 = "uninfected", only.pos = TRUE)
+M.de.markers$gene <- rownames(M.de.markers)
+
+VlnPlot(M_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** Casp4 is upregulated in both bystander and infected monocytes.
+
+------------------------------------------------------------------------
+
+### Dendritic Cells
+
+```{r DCs, cache=TRUE}
+DC_so <- subset(so, idents = c("DC", "DC.103+11B-"))
+Idents(DC_so) <- "Status"
+
+DC.de.markers <- FindMarkers(DC_so, ident.1 = "infected", ident.2 = "uninfected", only.pos = TRUE)
+DC.de.markers$gene <- rownames(DC.de.markers)
+
+VlnPlot(DC_so, features = "Casp4", cols = status_cols)
+```
+
+> **Summary:** No Casp4 upregulation detected in dendritic cells.
+
+------------------------------------------------------------------------
+
+## Casp4+ vs. Casp4− Cells in Infected Interstitial Macrophages
+
+This section compares gene expression between Casp4-expressing and non-expressing cells within the **infected** interstitial macrophage compartment, followed by pathway enrichment analysis.
+
+### Differential Expression
+
+```{r casp4-DE, cache=TRUE}
+Idents(Interstitial_so) <- "Status"
+infected_so <- subset(Interstitial_so, idents = "infected")
+Idents(infected_so) <- "Casp4_status"
+
+Casp4.de.markers <- FindMarkers(infected_so, ident.1 = "expressing", ident.2 = "not_expressing")
+Casp4.de.markers.pos <- subset(Casp4.de.markers, p_val_adj < 0.1)
+Casp4.de.markers.pos$gene <- rownames(Casp4.de.markers.pos)
+
+head(Casp4.de.markers.pos, 20)
+```
+
+### Gene Set Enrichment — GO Biological Process
+
+```{r GSEA-GO, cache=TRUE}
+de.genes  <- rownames(Casp4.de.markers.pos)
+all.genes <- unlist(infected_so@assays$RNA@data@Dimnames[1])
+
+# Keep only genes expressed in at least one cell to reduce memory usage
+expressed_mask <- Matrix::rowSums(infected_so@assays$RNA@data > 0) > 0
+all.genes <- all.genes[expressed_mask]
+
+# Convert gene symbols to Entrez IDs
+de.genes.entrez  <- na.omit(mapIds(org.Mm.eg.db, de.genes,  'ENTREZID', 'SYMBOL'))
+all.genes.entrez <- na.omit(mapIds(org.Mm.eg.db, all.genes, 'ENTREZID', 'SYMBOL'))
+
+enrichment.interstitial <- enrichGO(
+  gene          = de.genes.entrez,
+  ont           = "BP",
+  OrgDb         = org.Mm.eg.db,
+  universe      = all.genes.entrez,
+  readable      = TRUE,
+  pvalueCutoff  = 0.05
+)
+
+tab.go <- as.data.frame(enrichment.interstitial)
+tab.go[1:20, 1:6]
+```
+
+### Gene Set Enrichment — KEGG
+
+```{r GSEA-KEGG}
+enrichment.kegg <- enrichKEGG(
+  gene         = de.genes.entrez,
+  organism     = 'mmu',
+  universe     = all.genes.entrez,
+  pvalueCutoff = 0.05
+)
+
+tab.kegg <- as.data.frame(enrichment.kegg)
+tab.kegg <- subset(tab.kegg, Count > 0)
+tab.kegg[1:20, 1:6]
+```
+
+### Enrichment Visualizations
+
+```{r enrichment-plots, fig.height=8}
+group_color <- c("midnightblue", "dodgerblue4", "dodgerblue3", "skyblue3", "sienna4", "sienna3", "sienna2")
+
+edox  <- setReadable(enrichment.interstitial, 'org.Mm.eg.db', 'ENTREZID')
+edox2 <- pairwise_termsim(edox)
+
+# Tree plot
+treeplot(edox2, nCluster = 7, group_color = group_color) +
+  scale_color_gradient(low = col_low, high = "sienna1")
+
+# Network plots
+cnetplot(edox, foldChange = de.genes.entrez, showCategory = 20,
+         color_category = "midnightblue", color_gene = col_low)
+goplot(enrichment.interstitial, showCategory = 10)
+emapplot(edox2, showCategory = 15)
+
+# Bar and dot plots
+barplot(enrichment.interstitial, showCategory = 15) +
+  scale_fill_gradient(low = col_low, high = col_high) +
+  ggtitle("GO Barplot")
+barplot(enrichment.kegg, showCategory = 15) +
+  scale_fill_gradient(low = col_low, high = col_high) +
+  ggtitle("KEGG Barplot")
+
+dotplot(enrichment.interstitial, showCategory = 16) +
+  scale_color_gradient(low = col_low, high = col_high) +
+  ggtitle("GO Dotplot")
+dotplot(enrichment.kegg, showCategory = 16) +
+  scale_color_gradient(low = col_low, high = col_high) +
+  ggtitle("KEGG Dotplot")
+```
+
+------------------------------------------------------------------------
+
+## Summary Plots
+
+### Violin Plots
+
+```{r violin-summary}
+v1 <- VlnPlot(AM1_so,          features = c("Casp4", "Casp1"), cols = status_cols)
+v2 <- VlnPlot(Interstitial_so, features = c("Casp4", "Il1b"),  cols = status_cols)
+v1 + v2
+```
+
+### Dot Plots — Inflammasome Markers
+
+```{r dot-summary}
+d1 <- DotPlot(Alveolar_so,     features = c("Casp4", "Il1b", "Casp1", "Nlrp3"),
+              col.min = 0, cols = c(col_low, col_high)) +
+  ggtitle("Alveolar Macrophages")
+d2 <- DotPlot(Interstitial_so, features = c("Casp4", "Il1b", "Casp1", "Nlrp3"),
+              col.min = 0, cols = c(col_low, col_high)) +
+  ggtitle("Interstitial Macrophages")
+d1 + d2
+```
+
+### Feature & Scatter Plots
+
+```{r feature-plots}
+FeaturePlot(so, features = "Gbp7", split.by = "Status",
+            cols = c("lightgrey", col_high))
+
+FeatureScatter(so, "Gbp2", "Casp4", group.by = "Status",
+               cols = unname(status_cols))
+```
+
+------------------------------------------------------------------------
+
+## Percentage & Distribution Analysis
+
+This section quantifies the proportion of Casp4-expressing cells across macrophage subpopulations and examines how Casp4+ cells are distributed by cell type and infection status.
+
+### Setup
+
+```{r pda-setup}
+colorsName <- c("midnightblue", "dodgerblue4", "dodgerblue3", "dodgerblue2",
+                "sienna4",     "sienna3",     "sienna2",     "sienna1")
+
+# Infection status logical vectors (full Seurat object)
+is_infected   <- as.logical(so$Status == "infected")
+is_bystander  <- as.logical(so$Status == "bystander")
+is_uninfected <- as.logical(so$Status == "uninfected")
+
+# Casp4 expression logical vector
+is_Casp4pos <- as.logical(so$Casp4_status == "expressing")
+```
+
+### Casp4+ Frequency in Infected Cells (All Populations)
+
+```{r pda-total-frequency}
+# Total frequency of Casp4+ cells among all infected cells
+df.infected <- as.data.frame(so$Casp4_status[is_infected])
+tot_frequency_infected <- count(df.infected)
+tot_frequency_infected
+```
+
+### Casp4+ Percentage per Macrophage Subpopulation
+
+For each macrophage subpopulation, the proportion of Casp4-expressing cells among **infected** cells is calculated, alongside the mean Casp4 expression value in **uninfected** cells.
+
+```{r pda-percentages-loop}
+percentages <- c()
+frequencies <- c()
+mean_casp4  <- c()
+
+for (t in macrophages) {
+  frequencies <- dplyr::count(
+    as.data.frame(so$Casp4_status[is_infected & so$Cell_identity == t]),
+    so$Casp4_status[is_infected & so$Cell_identity == t]
+  )
+  percentages <- c(percentages,
+    frequencies[1, 2] / (frequencies[1, 2] + frequencies[2, 2]))
+  mean_casp4  <- c(mean_casp4,
+    mean(so$Casp4_value[is_uninfected & so$Cell_identity == t]))
+  print(t)
+}
+
+# Compile results
+percentages_perCellPop <- data.frame(Cell_type = macrophages, Percent_pos = percentages)
+row.names(percentages_perCellPop) <- macrophages
+
+mean_df <- data.frame(Cell_type = macrophages, Casp4 = mean_casp4)
+```
+
+```{r pda-percentages-plot}
+ggplot(percentages_perCellPop, aes(x = Cell_type, y = Percent_pos)) +
+  geom_bar(stat = "identity", color = "black", fill = colorsName) +
+  theme_minimal() +
+  labs(title = "Percentage of Casp4+ Cells per Macrophage Subpopulation (Infected)",
+       x = "Cell Type", y = "Proportion Casp4+")
+```
+
+### Distribution of Casp4+ Cells by Cell Type
+
+This analysis asks: among Casp4-expressing **bystander** macrophages, what is the cell-type composition?
+
+```{r pda-distribution}
+# Subset to macrophage populations only
+Idents(so) <- "Cell_identity"
+macrophages_so <- subset(so, idents = macrophages)
+
+# Redefine status vectors for the macrophage subset
+is_infected   <- as.logical(macrophages_so$Status == "infected")
+is_uninfected <- as.logical(macrophages_so$Status == "uninfected")
+is_bystander  <- as.logical(macrophages_so$Status == "bystander")
+is_Casp4pos   <- as.logical(macrophages_so$Casp4_status == "expressing")
+
+# Frequency of each cell type among Casp4+ bystander macrophages
+frequency_of_each_cell_type <- dplyr::count(
+  as.data.frame(macrophages_so$Cell_identity[is_Casp4pos & is_bystander]),
+  macrophages_so$Cell_identity[is_Casp4pos & is_bystander]
+)
+
+# Normalise to proportions
+percentage_of_each_cell_type <- frequency_of_each_cell_type
+percentage_of_each_cell_type[, 2] <- percentage_of_each_cell_type[, 2] /
+  length(so@assays$RNA@data@p[is_Casp4pos & is_bystander])
+```
+
+### Pie Chart: Casp4+ Bystander Macrophages
+
+```{r pda-pie}
+pie(percentage_of_each_cell_type[, 2],
+    labels   = percentage_of_each_cell_type[, 1],
+    clockwise = TRUE,
+    main     = "Casp4+ Bystander Macrophages",
+    col      = colorsName)
+```
+
+### Bar Plot: Percentage of Casp4+ Cells
+
+```{r pda-barplot}
+barplot(percentages_perCellPop[, 2],
+        col      = colorsName,
+        names.arg = percentages_perCellPop[, 1],
+        ylim     = c(0, 0.40),
+        main     = "Percentage of Casp4+ Cells per Subpopulation",
+        las      = 2,
+        ylab     = "Proportion Casp4+")
+```
+
+### Split Violin Plots: Casp4 Expression by Status
+
+```{r pda-split-violin}
+casp4_inf   <- as.data.frame(c())
+casp4_bys   <- as.data.frame(c())
+casp4_uninf <- as.data.frame(c())
+
+for (identity in macrophages) {
+  casp4_inf   <- c(casp4_inf,   as.data.frame(so$Casp4_value[is_infected   & so$Cell_identity == identity]))
+  casp4_bys   <- c(casp4_bys,   as.data.frame(so$Casp4_value[is_bystander  & so$Cell_identity == identity]))
+  casp4_uninf <- c(casp4_uninf, as.data.frame(so$Casp4_value[is_uninfected & so$Cell_identity == identity]))
+  print(identity)
+}
+
+vioplot(casp4_inf,
+        plotCentre = "line",
+        side       = "right",
+        col        = "midnightblue",
+        ylim       = c(2, 8),
+        wex        = 3,
+        names      = c("AM1", "AM2", "AM3", "AM4", "IM1", "IM2", "IM3", "IM4"))
+
+vioplot(casp4_bys,
+        plotCentre = "line",
+        side       = "left",
+        col        = "sienna2",
+        add        = TRUE,
+        wex        = 3)
+
+vioplot(casp4_uninf,
+        plotCentre = "line",
+        side       = "right",
+        col        = "sienna4",
+        add        = TRUE,
+        wex        = 3)
+
+legend("topright",
+       legend = c("Infected", "Bystander", "Uninfected"),
+       fill   = c("midnightblue", "sienna2", "sienna4"),
+       bty    = "n")
+```
+
+### UMAP & Feature Plots
+
+```{r pda-dimplots}
+Idents(macrophages_so) <- "Status"
+Casp4_so <- subset(so, idents = "expressing")
+
+Idents(Casp4_so) <- "Cell_identity"
+Idents(so)       <- "Cell_identity"
+
+# UMAP split by infection status — all cells
+DimPlot(so, split.by = "Status")
+
+# UMAP — Casp4+ cells only, split by status
+DimPlot(Casp4_so, split.by = "Status")
+```
+
+```{r pda-feature-plots}
+# Casp4 expression on UMAP, split by infection status
+FeaturePlot(so,
+            features = "Casp4",
+            cols     = c("#D3D3D315", col_high),
+            split.by = "Status",
+            pt.size  = 0.3) +
+  theme(legend.position = "right")
+
+# Full UMAP coloured by cell identity
+DimPlot(so,
+        group.by = "Cell_identity",
+        cols     = cell_identity_cols)
+```
+
+### Dot Plots: Casp4 by Cell Identity and Infection Status
+
+```{r pda-dotplots}
+Idents(so) <- "Status"
+
+d1 <- DotPlot(macrophages_so, features = "Casp4", group.by = "Cell_identity",
+              idents = "uninfected", col.min = 0, cols = c(col_low, col_high)) +
+  ggtitle("Uninfected")
+
+d2 <- DotPlot(macrophages_so, features = "Casp4", group.by = "Cell_identity",
+              idents = "bystander",  col.min = 0, cols = c(col_low, col_high)) +
+  ggtitle("Bystander")
+
+d3 <- DotPlot(macrophages_so, features = "Casp4", group.by = "Cell_identity",
+              idents = "infected",   col.min = 0, cols = c(col_low, col_high)) +
+  ggtitle("Infected")
+
+d1 + d2 + d3
+```
+
+------------------------------------------------------------------------
+
+## Session Info
+
+```{r session-info}
+sessionInfo()
+```
