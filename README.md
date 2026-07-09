@@ -34,10 +34,10 @@ The input dataset (`GSE167232_mtb_integrated.RDS`) is not included in this repos
 ## **Analysis**
 
 ### 1. Alveolar Macrophage Subpopulations (AM_1 - AM_4)
-Differential expression between infected, bystander, and uninfected cells for each AM subpopulation. Casp4 is notably upregulated in **infected AM_1** cells only.
+Differential expression between infected, bystander, and uninfected cells for each AM subpopulation. Casp4 is upregulated in **infected AM_1** cells only.
 
 ### 2. Interstitial Macrophage Subpopulations (IM_1 - IM_4)
-Equivalent analysis for IM subpopulations. IM_3 has insufficient uninfected cells for full Differential Expression analysis. DotPlots are used as a complementary view.
+Equivalent analysis for IM subpopulations. IM_3 has insufficient uninfected cells for full Differential Expression analysis. DotPlots are used for visualization.
 
 ### 3. Other Myeloid Populations
 - **Neutrophils**: Casp4 is upregulated in both bystander and infected cells
