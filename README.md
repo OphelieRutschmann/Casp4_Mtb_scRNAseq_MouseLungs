@@ -12,8 +12,7 @@ This repository contains the scripts to analyse Caspase-4 (Caspase-11) expressio
 
 Cells are separated by infection status (**infected**, **bystander**, and **uninfected**) and differential expression is assessed within each macrophage subpopulation. The analysis also includes pathway enrichment and a quantitative breakdown of Casp4+ cell distributions across populations.
 
-> **Data source:** Pisu D, Huang L, Narang V, et al. *Single cell analysis of M. tuberculosis phenotype and macrophage lineages in the infected lung.* J Exp Med. 2021;218(9):e20210615. doi:[10.1084/jem.20210615](https://doi.org/10.1084/jem.20210615)
-
+> **Data source:** The single-cell data was obtained from Prof. Russel's laboratory and is available under GEO Accession number GSE167232. 
 ---
 
 ## **Repository Structure**
@@ -79,7 +78,9 @@ This analysis focuses on determining the following:
 
 2. Open `Caspase4_Analysis.Rmd` in RStudio and knit to HTML or PDF.
 
-## **Citation**
+## **Citations**
+> Pisu D, Huang L, Narang V, et al. *Single cell analysis of M. tuberculosis phenotype and macrophage lineages in the infected lung.* J Exp Med. 2021;218(9):e20210615. doi:[10.1084/jem.20210615](https://doi.org/10.1084/jem.20210615)
+
 
 If you use this analysis or build upon it, please cite the original dataset:
 
