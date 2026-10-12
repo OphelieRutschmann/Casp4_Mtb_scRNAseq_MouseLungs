@@ -79,9 +79,6 @@ This analysis focuses on determining the following:
 2. Open `Caspase4_Analysis.Rmd` in RStudio and knit to HTML or PDF.
 
 ## **Citations**
-> Pisu D, Huang L, Narang V, et al. *Single cell analysis of M. tuberculosis phenotype and macrophage lineages in the infected lung.* J Exp Med. 2021;218(9):e20210615. doi:[10.1084/jem.20210615](https://doi.org/10.1084/jem.20210615)
-
-
 If you use this analysis or build upon it, please cite the original dataset:
 
 > Pisu D, Huang L, Narang V, Theriault M, Lê-Bury G, Lee B, Lakudzala AE, Mzinza DT, Mhango DV, Mitini-Nkhoma SC, Jambo KC, Singhal A, Mwandumba HC, Russell DG. Single cell analysis of M. tuberculosis phenotype and macrophage lineages in the infected lung. *J Exp Med.* 2021 Sep 6;218(9):e20210615. doi: 10.1084/jem.20210615.
